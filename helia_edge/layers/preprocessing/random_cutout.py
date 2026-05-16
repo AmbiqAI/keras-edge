@@ -70,17 +70,19 @@ class RandomCutout1D(BaseAugmentation1D):
         batch_size = input_shape[0]
         duration_size = input_shape[self.data_axis]
 
+        # Use keras.ops.cast instead of int() to support symbolic tensors (e.g. tf.data graph tracing)
+        duration_f = keras.ops.cast(duration_size, "float32")
         cut_size = keras.random.randint(
             shape=(batch_size,),
-            minval=int(duration_size * self.factor[0]),
-            maxval=int(duration_size * self.factor[1]) + 1,
+            minval=keras.ops.cast(duration_f * self.factor[0], "int32"),
+            maxval=keras.ops.cast(duration_f * self.factor[1], "int32") + 1,
             dtype="int32",
             seed=self.random_generator,
         )
         cut_start = keras.random.randint(
             shape=(batch_size,),
             minval=0,
-            maxval=int(duration_size * (1 - self.factor[1]) + 1),
+            maxval=keras.ops.cast(duration_f * (1.0 - self.factor[1]) + 1.0, "int32"),
             dtype="int32",
             seed=self.random_generator,
         )
@@ -123,6 +125,40 @@ class RandomCutout1D(BaseAugmentation1D):
             tile_size,
         )
         result = keras.ops.where(mask, fill, sample)
+        return result
+
+    def augment_label(self, inputs) -> keras.KerasTensor:
+        """Apply the same cutout mask to labels/targets.
+
+        This enables paired cutout for autoencoder/reconstruction tasks where
+        zeroing the input should also zero the target.
+        """
+        label = inputs[self.LABELS]
+        transforms = inputs[self.TRANSFORMS]
+        cut_start = transforms["cut_start"]
+        cut_size = transforms["cut_size"]
+
+        duration_size = label.shape[self.data_axis]
+        ch_size = label.shape[self.ch_axis]
+
+        if self.data_format == "channels_first":
+            reshape_size = (1, duration_size)
+            tile_size = (ch_size, 1)
+        else:
+            reshape_size = (duration_size, 1)
+            tile_size = (1, ch_size)
+
+        mask = keras.ops.tile(
+            keras.ops.reshape(
+                keras.ops.logical_and(
+                    keras.ops.arange(duration_size) >= cut_start, keras.ops.arange(duration_size) < cut_start + cut_size
+                ),
+                reshape_size,
+            ),
+            tile_size,
+        )
+        fill = keras.ops.zeros_like(label)
+        result = keras.ops.where(mask, fill, label)
         return result
 
     def get_config(self):
@@ -194,31 +230,35 @@ class RandomCutout2D(BaseAugmentation2D):
         height_size = input_shape[self.height_axis]
         width_size = input_shape[self.width_axis]
 
+        # Use keras.ops.cast instead of int() to support symbolic tensors (e.g. tf.data graph tracing)
+        height_f = keras.ops.cast(height_size, "float32")
+        width_f = keras.ops.cast(width_size, "float32")
+
         cut_height = keras.random.randint(
             shape=(batch_size,),
-            minval=int(height_size * self.factor[0]),
-            maxval=int(height_size * self.factor[1]) + 1,
+            minval=keras.ops.cast(height_f * self.factor[0], "int32"),
+            maxval=keras.ops.cast(height_f * self.factor[1], "int32") + 1,
             dtype="int32",
             seed=self.random_generator,
         )
         cut_width = keras.random.randint(
             shape=(batch_size,),
-            minval=int(width_size * self.factor[0]),
-            maxval=int(width_size * self.factor[1]) + 1,
+            minval=keras.ops.cast(width_f * self.factor[0], "int32"),
+            maxval=keras.ops.cast(width_f * self.factor[1], "int32") + 1,
             dtype="int32",
             seed=self.random_generator,
         )
         cut_start_height = keras.random.randint(
             shape=(batch_size,),
             minval=0,
-            maxval=int(height_size * (1 - self.factor[1]) + 1),
+            maxval=keras.ops.cast(height_f * (1.0 - self.factor[1]) + 1.0, "int32"),
             dtype="int32",
             seed=self.random_generator,
         )
         cut_start_width = keras.random.randint(
             shape=(batch_size,),
             minval=0,
-            maxval=int(width_size * (1 - self.factor[1]) + 1),
+            maxval=keras.ops.cast(width_f * (1.0 - self.factor[1]) + 1.0, "int32"),
             dtype="int32",
             seed=self.random_generator,
         )
